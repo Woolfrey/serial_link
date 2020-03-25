@@ -1,9 +1,8 @@
-#include "Eigen/Dense"
 #include "ros/ros.h"
-#include "serial_link.h"
+#include "SerialLink.h"
 
 
-int main{int argc, char **argc}
+int main(int argc, char **argv)
 {
 	ros::init(argc, argv, "serial_link");
 	ros::NodeHandle n;
