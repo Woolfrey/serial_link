@@ -2,6 +2,15 @@
 #include "urdf/model.h"
 #include "geometry_msgs/Twist.h"
 
+
+
+/*
+
+
+	TO DO:
+		- Check if manipulability is increase or decreasing, and modify damping accordingly
+*/
+
 class SerialLink{
 
 	public:
@@ -25,8 +34,6 @@ class SerialLink{
 		void setOrigin(geometry_msgs::Pose &input);				// Set the origin frame for computing kinematics and dynamics
 		void updateState(sensor_msgs::JointState &input);			// Update just the joint states
 		void updateState(sensor_msgs::JointState &input, geometry_msgs::Pose &baseTF); // Update joint states and base transform
-		void invertJacobian();							// Pseudoinverse Jacobian
-		void invertJacobian(Eigen::MatrixXd W);					// Weighted pseudoinverse Jacobian
 		
 		// Velocity Control Functions
 
@@ -42,6 +49,11 @@ class SerialLink{
 		sensor_msgs::JointState jointState;					// Position, velocity, acceleration?
 
 		serial_link::Serial serial;						// Array of links
+
+
+		void invertJacobian(Eigen::MatrixXd &W);				// Weighted pseudo-inverse
+		void invertJacobian();							// No weighting matrix given, so use identity matrix
+
 
 };											// Class definitions must end with a semicolon
 
@@ -329,12 +341,28 @@ void SerialLink::updateState(sensor_msgs::JointState &input)				// Update just t
 sensor_msgs::JointState SerialLink::rmrc(const geometry_msgs::Pose &pose, const geometry_msgs::Twist &velocity)
 {
 	sensor_msgs::JointState control;						// Value to be returned
+	control.velocity.resize(this->n);
 
 	updateJacobian(this->J, this->a, this->r, this->serial);			// Update the Jacobian matrix for current state
 
+	invertJacobian(); /*** In future use invertJacobian(this->M) ***/		// Update the inverse of this Jacobian
+
+	geometry_msgs::Pose error = getPoseError(pose, this->FK.poses[this->n]);	// Compute the current pose error
+
+	for(int i = 0; i < this->n; i++)
+	{
+		control.velocity[i] = this->invJ(i,0)*error.position.x
+				    + this->invJ(i,1)*error.position.y
+				    + this->invJ(i,2)*error.position.z
+				    + this->invJ(i,3)*error.orientation.x
+				    + this->invJ(i,4)*error.orientation.y
+				    + this->invJ(i,5)*error.orientation.z;
+	}
+
+	return control;
 }
 
-void SerialLink::invertJacobian(Eigen::MatrixXd W)					// Weighted pseudo-inverse
+void SerialLink::invertJacobian(Eigen::MatrixXd &W)					// Weighted pseudo-inverse
 {
 	Eigen::MatrixXd JJt;	
 	
@@ -358,14 +386,16 @@ void SerialLink::invertJacobian(Eigen::MatrixXd W)					// Weighted pseudo-invers
 		lambda = (1-pow(this->threshold/m,2))*this->maxDamping;
 	}
 
-	Eigen::MatrixXd invWJt = W.inverse()*J.transpose();
+	Eigen::MatrixXd invWJt = W.inverse()*J.transpose();				// Hopefully makes computations a little faster
 
-	this->invJ = invWJt*(J*invWJt + lambda*Eigen::MatrixXd::Identity(6,6)).inverse();
+	this->invJ = invWJt*(J*invWJt + lambda*Eigen::MatrixXd::Identity(6,6)).inverse(); // Weighted pseudoinverse
 }
 
-void SerialLink::invertJacobian()
+void SerialLink::invertJacobian()							// No weighting matrix given, so use identity matrix
 {
-	invertJacobian(Eigen::MatrixXd::Identity(this->n,this->n));
+	Eigen::MatrixXd W;
+	W.setIdentity(this->n,this->n);
+	invertJacobian(W);
 }
 
 

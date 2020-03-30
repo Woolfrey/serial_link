@@ -145,7 +145,7 @@ void updateJacobian(Eigen::MatrixXd &J, const Eigen::MatrixXd &a, const Eigen::M
 	}
 }
 
-geometry_msgs::Pose poseError(const geometry_msgs::Pose &d, const geometry_msgs::Pose &a)
+geometry_msgs::Pose getPoseError(const geometry_msgs::Pose &d, const geometry_msgs::Pose &a)
 {
 	geometry_msgs::Pose error;
 	
@@ -163,10 +163,16 @@ error.orientation.z = -d.orientation.w*a.orientation.z - d.orientation.x*a.orien
 	return error;
 }
 
-double getJointWeight(const double &q, const double &qdot, const serial_link::Joint &joint)
+
+double getJointWeight(const double &pos, const double &vel, const serial_link::Joint joint)
 {
-	double weight = 0;									// Default value
-
-	return weight;
+	double s= 1000*pow(joint.upperLimit - joint.lowerLimit, -2);					// Individual joint scalar
+	double u = joint.upperLimit - pos;								// Distance from upper limit
+	double v = pos - joint.lowerLimit;								// Distance from lower limit
+	double df = (u*u - v*v)/(-s*u*u*v*v);								// Partial-derivative of penalty function
+	double fdot = df*vel;										// Time-derivative of penalty function
+	
+	if(fdot > 0) return df;										// Moving toward a joint limit
+	else return 0;											// Moving away from joint limit
 }
-
+						
