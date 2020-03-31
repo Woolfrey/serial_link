@@ -112,9 +112,6 @@ catkin_package(
 	INCLUDE_DIRS include
 	CATKIN_DEPENDS message_runtime
 	DEPENDS Eigen
-#  LIBRARIES serial_link
-#  CATKIN_DEPENDS geometry_msgs roscpp sensor_msgs std_msgs
-#  DEPENDS system_lib
 )
 
 ###########
@@ -144,7 +141,7 @@ include_directories(
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
 # add_executable(${PROJECT_NAME}_node src/serial_link_node.cpp)
-add_executable(test src/test.cpp)
+add_executable(serial_test_node src/serial_test_node.cpp)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -155,10 +152,10 @@ add_executable(test src/test.cpp)
 ## Add cmake target dependencies of the executable
 ## same as for the library above
 # add_dependencies(${PROJECT_NAME}_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-add_dependencies(test ${serial_link_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(serial_test_node ${serial_link_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 ## Specify libraries to link a library or executable target against
-target_link_libraries(test ${catkin_LIBRARIES})
+target_link_libraries(serial_test_node ${catkin_LIBRARIES})
 
 #############
 ## Install ##

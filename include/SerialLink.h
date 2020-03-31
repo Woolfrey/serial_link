@@ -2,8 +2,6 @@
 #include "urdf/model.h"
 #include "geometry_msgs/Twist.h"
 
-
-
 /*
 
 
@@ -14,18 +12,18 @@
 class SerialLink{
 
 	public:
+		// Properties
+		double threshold = 0.01;					// Threshold value for activating damped least squares
+		double maxDamping = 0.1;					// Maximum damping factor
 
-		double threshold = 0.01;						// Threshold value for activating damped least squares
-		double maxDamping = 0.1;						// Maximum damping factor
+		int Hz;								// Control frequency (used for joint limit avoidance)
 
-		int Hz;									// Control frequency (used for joint limit avoidance)
-
-		Eigen::MatrixXd J;							// Jacobian matrix
+		Eigen::MatrixXd J;						// Jacobian matrix
 		Eigen::MatrixXd invJ;
 
 		// Constructor(s)
-		SerialLink();								// Default control frequency of 100Hz
-		SerialLink(int controlFreq);						// Specify the control frequency
+		SerialLink();							// Default control frequency of 100Hz
+		SerialLink(int controlFreq);					// Specify the control frequency
 
 		// Get Functions
 		sensor_msgs::JointState rmrc(const geometry_msgs::Pose &pose, const geometry_msgs::Twist &velocity);
