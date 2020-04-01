@@ -17,21 +17,26 @@ class SerialLink{
 		double maxDamping = 0.1;					// Maximum damping factor
 
 		int Hz;								// Control frequency (used for joint limit avoidance)
+		int n;								// No. of joints
 
 		Eigen::MatrixXd J;						// Jacobian matrix
-		Eigen::MatrixXd invJ;
+		Eigen::MatrixXd invJ;						// Inverse of the Jacobian
+
+		geometry_msgs::PoseArray FK;					// Forward kinematics chain
 
 		// Constructor(s)
 		SerialLink();							// Default control frequency of 100Hz
 		SerialLink(int controlFreq);					// Specify the control frequency
 
 		// Get Functions
-		sensor_msgs::JointState rmrc(const geometry_msgs::Pose &pose, const geometry_msgs::Twist &velocity);
+		sensor_msgs::JointState rmrc(const geometry_msgs::Pose &pose, 
+					     const geometry_msgs::Twist &velocity);
 
 		// Set Functions
-		void setOrigin(geometry_msgs::Pose &input);				// Set the origin frame for computing kinematics and dynamics
-		void updateState(sensor_msgs::JointState &input);			// Update just the joint states
-		void updateState(sensor_msgs::JointState &input, geometry_msgs::Pose &baseTF); // Update joint states and base transform
+		void setOrigin(const geometry_msgs::Pose &input);	// Set the origin frame for computing kinematics and dynamics
+		void updateState(const sensor_msgs::JointState &input);		// Update just the joint states
+		void updateState(const sensor_msgs::JointState &input,
+				 const geometry_msgs::Pose &baseTF); 		// Update joint states and base transform
 		
 		// Velocity Control Functions
 
@@ -39,10 +44,7 @@ class SerialLink{
 		Eigen::MatrixXd a;							// Axis of actuation for each joint
 		Eigen::MatrixXd r;							// Distance from each joint to end-effector
 
-		geometry_msgs::PoseArray FK;						// Forward kinematics chain
 		geometry_msgs::Pose origin;						// Origin with which to compute kinematics, dynamics
-
-		int n;									// No. of joints
 
 		sensor_msgs::JointState jointState;					// Position, velocity, acceleration?
 
@@ -58,13 +60,13 @@ class SerialLink{
 
 SerialLink::SerialLink()
 {
-	ROS_INFO_STREAM("Default control frequency is 100Hz. Is this OK? (Y/n):");
+/*	ROS_INFO_STREAM("Default control frequency is 100Hz. Is this OK? (Y/n):");
 	char input;
 	std::cin >> input;
 	if(input == 'Y')
 	{
 		SerialLink(100);
-	}
+	}*/
 }
 
 SerialLink::SerialLink(int controlFreq)
@@ -78,8 +80,8 @@ SerialLink::SerialLink(int controlFreq)
 	urdf::Vector3 tempVector;								// Temporary storage
 	urdf::Rotation tempRotation;								// Temporary storage
 	geometry_msgs::Pose tempTF;								// Temporary storage
-
-	if(model.initParam("urdf"))
+/*
+	if(model.initParam("urdf")) /*** This appears to be the problem ***
 	{
 		branch.push_back(*model.getRoot());						// This gets the location of the urdf model
 		int count = 0;									// No. of child links	
@@ -314,18 +316,19 @@ SerialLink::SerialLink(int controlFreq)
 */
 }
 
-void SerialLink::setOrigin(geometry_msgs::Pose &input)					// Set the origin frame for computing kinematics and dynamics
+void SerialLink::setOrigin(const geometry_msgs::Pose &input)	// Set the origin frame for computing kinematics and dynamics
 {
 	this->origin = input;							
 }
 
-void SerialLink::updateState(sensor_msgs::JointState &input, geometry_msgs::Pose &baseTF) // Update joint states and base transform
+void SerialLink::updateState(const sensor_msgs::JointState &input,
+			     const geometry_msgs::Pose &baseTF) 			// Update joint states and base transform
 {
 	setOrigin(baseTF);								// Update base
 	updateState(input);
 }
 
-void SerialLink::updateState(sensor_msgs::JointState &input)				// Update just the joint states
+void SerialLink::updateState(const sensor_msgs::JointState &input)			// Update just the joint states
 {
 	this->jointState.position = input.position;
 	this->jointState.velocity = input.velocity;
