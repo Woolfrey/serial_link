@@ -82,11 +82,11 @@ void updateForwardKinematics(geometry_msgs::PoseArray &T, const sensor_msgs::Joi
 			Tq.orientation.z = 0;
 		}
 
-		if(i == 0) T.poses[i] = multiplyPose(multiplyPose(T0,serial.link[i].transform),Tq);		// First multiply the base transform
+		if(i == 0) T.poses[i] = multiplyPose(multiplyPose(T0,serial.link[i].transform),Tq); // First multiply the base transform
 		else	   T.poses[i] = multiplyPose(multiplyPose(T.poses[i-1],serial.link[i].transform),Tq);
 	}
 
-	T.poses[n] = multiplyPose(T.poses[n-1],serial.link[n].transform);					// Transform to end-effector has no joint
+	T.poses[n] = multiplyPose(T.poses[n-1],serial.link[n].transform);		// Transform to end-effector has no joint
 }
 
 void updateAxis(Eigen::MatrixXd &axis, const geometry_msgs::PoseArray &FK, const serial_link::Serial &serial)

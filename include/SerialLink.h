@@ -6,7 +6,9 @@
 
 
 	TO DO:
-		- Check if manipulability is increase or decreasing, and modify damping accordingly
+		- Add proper Proportional and Derivative gains
+		- Create template YAML file for loading parameters
+		- Fix extraction of properties from URDF
 */
 
 class SerialLink{
@@ -24,13 +26,21 @@ class SerialLink{
 
 		geometry_msgs::PoseArray FK;					// Forward kinematics chain
 
+		sensor_msgs::JointState jointState;				// Position, velocity, acceleration?
+
+		serial_link::Serial serial;					// Array of links and joints
+
 		// Constructor(s)
 		SerialLink();							// Default control frequency of 100Hz
 		SerialLink(int controlFreq);					// Specify the control frequency
 
 		// Get Functions
+		double getDamping(const Eigen::MatrixXd &J);
+
 		sensor_msgs::JointState rmrc(const geometry_msgs::Pose &pose, 
 					     const geometry_msgs::Twist &velocity);
+
+		void getJacobian(Eigen::MatrixXd &J);
 
 		// Set Functions
 		void setOrigin(const geometry_msgs::Pose &input);	// Set the origin frame for computing kinematics and dynamics
@@ -46,10 +56,7 @@ class SerialLink{
 
 		geometry_msgs::Pose origin;						// Origin with which to compute kinematics, dynamics
 
-		sensor_msgs::JointState jointState;					// Position, velocity, acceleration?
-
-		serial_link::Serial serial;						// Array of links
-
+		sensor_msgs::JointState control_msg;					// Joint control message
 
 		void invertJacobian(Eigen::MatrixXd &W);				// Weighted pseudo-inverse
 		void invertJacobian();							// No weighting matrix given, so use identity matrix
@@ -335,15 +342,12 @@ void SerialLink::updateState(const sensor_msgs::JointState &input)			// Update j
 	this->jointState.effort = input.effort; /*** Might need to compute this properly as acceleration? ***/
 
 	updateForwardKinematics(this->FK, this->jointState, this->serial, this->origin); // Update the forward-kinematics chain
-	updateAxis(this->a, this->FK, this->serial);
-	updateTranslation(this->r, this->FK);
+	updateAxis(this->a, this->FK, this->serial);				// Joint axis in reference frame
+	updateTranslation(this->r, this->FK);					// Distance from joint to end-effector in reference frame
 }
 
-sensor_msgs::JointState SerialLink::rmrc(const geometry_msgs::Pose &pose, const geometry_msgs::Twist &velocity)
+sensor_msgs::JointState SerialLink::rmrc(const geometry_msgs::Pose &pose, const geometry_msgs::Twist &vel)
 {
-	sensor_msgs::JointState control;						// Value to be returned
-	control.velocity.resize(this->n);
-
 	updateJacobian(this->J, this->a, this->r, this->serial);			// Update the Jacobian matrix for current state
 
 	invertJacobian(); /*** In future use invertJacobian(this->M) ***/		// Update the inverse of this Jacobian
@@ -352,39 +356,45 @@ sensor_msgs::JointState SerialLink::rmrc(const geometry_msgs::Pose &pose, const 
 
 	for(int i = 0; i < this->n; i++)
 	{
-		control.velocity[i] = this->invJ(i,0)*error.position.x
-				    + this->invJ(i,1)*error.position.y
-				    + this->invJ(i,2)*error.position.z
-				    + this->invJ(i,3)*error.orientation.x
-				    + this->invJ(i,4)*error.orientation.y
-				    + this->invJ(i,5)*error.orientation.z;
+		this->control_msg.velocity[i] = this->invJ(i,0)*(vel.linear.x + 0.9*error.position.x)
+				    	      + this->invJ(i,1)*(vel.linear.y + 0.9*error.position.y)
+				    	      + this->invJ(i,2)*(vel.linear.z + 0.9*error.position.z)
+				    	      + this->invJ(i,3)*(vel.angular.x + 0.9*error.orientation.x)
+				    	      + this->invJ(i,4)*(vel.angular.y + 0.9*error.orientation.y)
+				    	      + this->invJ(i,5)*(vel.angular.z + 0.9*error.orientation.z);
 	}
 
-	return control;
+	return control_msg;
 }
 
-void SerialLink::invertJacobian(Eigen::MatrixXd &W)					// Weighted pseudo-inverse
+double SerialLink::getDamping(const Eigen::MatrixXd &J)
 {
-	Eigen::MatrixXd JJt;	
-	
+	Eigen::MatrixXd JJt;
+
 	for(int i = 0; i < 6; i++)
 	{
 		for(int j = 0; j < this->n; j++)
 		{
-			W(j,j) += getJointWeight(this->jointState.position[i], this->jointState.velocity[i], this->serial.joint[i]);
-
-			for(int k = 0; k < 6; k++)
-			{
-				JJt(i,k) = J(i,j)*J(k,j);				// Compute J*J.transpose();
-			}
+			for(int k = 0; k < 6; k++) JJt(i,k) = J(i,j)*J(k,j);
 		}
 	}
+
+	double m = pow(JJt.determinant(),0.5);
 	
-	double m = pow(JJt.determinant(),0.5);						// Measure of manipulability
-	double lambda = 0;								// Damping value
-	if(m < this->threshold)
+	if(m < this->threshold) return (1-pow(this->threshold/m,2))*this->maxDamping;
+	else			return 0.0;
+}
+
+void SerialLink::invertJacobian(Eigen::MatrixXd &W)					// Weighted pseudo-inverse
+{
+
+	double lambda = getDamping(this->J);						// Get the coefficient for DLS
+
+	for(int i = 0; i < this->n; i++)
 	{
-		lambda = (1-pow(this->threshold/m,2))*this->maxDamping;
+		W(i,i) = getJointWeight(this->jointState.position[i],
+					this->jointState.velocity[i],
+					this->serial.joint[i]);
 	}
 
 	Eigen::MatrixXd invWJt = W.inverse()*J.transpose();				// Hopefully makes computations a little faster
