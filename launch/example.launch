@@ -1,0 +1,3 @@
+<launch>
+        <rosparam file="$(find serial_link)/params/serial_link_example.yaml"/>
+</launch>
