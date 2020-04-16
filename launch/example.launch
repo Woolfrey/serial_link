@@ -1,3 +1,9 @@
+<?xml version="1.0"?>
 <launch>
         <rosparam file="$(find serial_link)/params/serial_link_example.yaml"/>
+	<param name="ur3" command="$(find xacro)/xacro --inorder '$(find ur_description)/urdf/ur3_robot.urdf.xacro'"/>
+
+	<node pkg="serial_link" type="serial_test_node" name="ur3" output="screen">
+		<!-- param name = "name" type = "type" value = "value" -->
+	</node>
 </launch>

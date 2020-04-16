@@ -1,22 +1,14 @@
-#include "Kinematics.h"
-#include "urdf/model.h"
 #include "geometry_msgs/Twist.h"
-
-/*
-
-
-	TO DO:
-		- Add proper Proportional and Derivative gains
-		- Create template YAML file for loading parameters
-		- Fix extraction of properties from URDF
-*/
+#include "Kinematics.h"
+#include "string"
+#include "urdf/model.h"
 
 class SerialLink{
 
 	public:
 		// Properties
 		double threshold = 0.01;					// Threshold value for activating damped least squares
-		double maxDamping = 0.1;					// Maximum damping factor
+		double max_damping = 0.1;					// Maximum damping factor
 
 		int Hz;								// Control frequency (used for joint limit avoidance)
 		int n;								// No. of joints
@@ -26,16 +18,19 @@ class SerialLink{
 
 		geometry_msgs::PoseArray FK;					// Forward kinematics chain
 
-		sensor_msgs::JointState jointState;				// Position, velocity, acceleration?
+		sensor_msgs::JointState joint_state;				// Position, velocity, acceleration?
 
 		serial_link::Serial serial;					// Array of links and joints
 
+		std::string name = "manipulator_name";				// Used to identify this manipulator
+
 		// Constructor(s)
-		SerialLink();							// Default control frequency of 100Hz
-		SerialLink(int controlFreq);					// Specify the control frequency
+		SerialLink();							// Empty constructor
+		SerialLink(const std::string &paramName);			// Contructor from parameter server
+		
 
 		// Get Functions
-		double getDamping(const Eigen::MatrixXd &J);
+		double getDamping(const Eigen::MatrixXd &J);			// Scalar value for damped least squares
 
 		sensor_msgs::JointState rmrc(const geometry_msgs::Pose &pose, 
 					     const geometry_msgs::Twist &velocity);
@@ -43,52 +38,47 @@ class SerialLink{
 		void getJacobian(Eigen::MatrixXd &J);
 
 		// Set Functions
+		bool init(const std::string &paramName);			// Initialize from parameter server		
 		void setOrigin(const geometry_msgs::Pose &input);	// Set the origin frame for computing kinematics and dynamics
 		void updateState(const sensor_msgs::JointState &input);		// Update just the joint states
 		void updateState(const sensor_msgs::JointState &input,
 				 const geometry_msgs::Pose &baseTF); 		// Update joint states and base transform
-		
-		// Velocity Control Functions
 
 	private:
-		Eigen::MatrixXd a;							// Axis of actuation for each joint
-		Eigen::MatrixXd r;							// Distance from each joint to end-effector
+		Eigen::MatrixXd a;						// Axis of actuation for each joint
+		Eigen::MatrixXd r;						// Distance from each joint to end-effector
 
-		geometry_msgs::Pose origin;						// Origin with which to compute kinematics, dynamics
+		geometry_msgs::Pose origin;					// Origin with which to compute kinematics, dynamics
 
-		sensor_msgs::JointState control_msg;					// Joint control message
+		sensor_msgs::JointState control_msg;				// Joint control message
 
-		void invertJacobian(Eigen::MatrixXd &W);				// Weighted pseudo-inverse
-		void invertJacobian();							// No weighting matrix given, so use identity matrix
-
-
-};											// Class definitions must end with a semicolon
+		void invertJacobian(Eigen::MatrixXd &W);			// Weighted pseudo-inverse
+		void invertJacobian();						// No weighting matrix given, so use identity matrix
 
 
-SerialLink::SerialLink()
+};										// Class definitions must end with a semicolon
+
+SerialLink::SerialLink() 							// Empty constructor
 {
-/*	ROS_INFO_STREAM("Default control frequency is 100Hz. Is this OK? (Y/n):");
-	char input;
-	std::cin >> input;
-	if(input == 'Y')
-	{
-		SerialLink(100);
-	}*/
 }
 
-SerialLink::SerialLink(int controlFreq)
+SerialLink::SerialLink(const std::string &paramName)				// Name in the parameter server
 {
+	init(paramName);							
+}
 
+bool SerialLink::init(const std::string &paramName)
+{
 	// Step 1: Prune the URDF tree to get rid of all superfluous links
-	urdf::Model model;									// Model from urdf file
-	std::vector<urdf::Link> branch;								// Gets the main forward kinematics sequence
-	std::vector<urdf::Link> twig;								// All child links attached to a branch
-	std::vector<urdf::Link> bud;								// All child links attached to a twig
-	urdf::Vector3 tempVector;								// Temporary storage
-	urdf::Rotation tempRotation;								// Temporary storage
-	geometry_msgs::Pose tempTF;								// Temporary storage
-/*
-	if(model.initParam("urdf")) /*** This appears to be the problem ***
+	urdf::Model model;								// Model from urdf file
+	std::vector<urdf::Link> branch;							// Gets the main forward kinematics sequence
+	std::vector<urdf::Link> twig;							// All child links attached to a branch
+	std::vector<urdf::Link> bud;							// All child links attached to a twig
+	urdf::Vector3 tempVector;							// Temporary storage
+	urdf::Rotation tempRotation;							// Temporary storage
+	geometry_msgs::Pose tempTF;							// Temporary storage
+
+	if(model.initParam(paramName)) 
 	{
 		branch.push_back(*model.getRoot());						// This gets the location of the urdf model
 		int count = 0;									// No. of child links	
@@ -97,24 +87,24 @@ SerialLink::SerialLink(int controlFreq)
 
 		while(!breakLoop)
 		{
-			twig.clear();								// Clear twig array
-			if(branch[count].child_links.size() == 0)				// If no more child links...
+			twig.clear();							// Clear twig array
+			if(branch[count].child_links.size() == 0)			// If no more child links...
 			{
-				breakLoop = true;						// ... break the loop
+				breakLoop = true;					// ... break the loop
 			}
 			else
 			{
-				twig.resize(branch[count].child_links.size());			// Get number of child links attached to this branch
-				std::vector<int> potential(twig.size(),0);			// Potential for each of the twigs
+				twig.resize(branch[count].child_links.size());		// Get number of child links attached to this branch
+				std::vector<int> potential(twig.size(),0);		// Potential for each of the twigs
 
 				for(int i=0; i<twig.size(); i++)
 				{
-					twig[i]  = *branch[count].child_links[i];		// Add child link
+					twig[i]  = *branch[count].child_links[i];	// Add child link
 					bud.clear();
 
 					for(int j=0; j<twig[i].child_links.size(); j++)
 					{
-						bud.push_back(*twig[i].child_links[j]); 	// Add child links from this twig
+						bud.push_back(*twig[i].child_links[j]); // Add child links from this twig
 						
 						for(int k=0; k < bud.size(); k++) potential[i] += bud[k].child_links.size(); // Twig potential is number of child links
 					}
@@ -152,75 +142,82 @@ SerialLink::SerialLink(int controlFreq)
 	else throw "Unable to load URDF from the parameter server";
 
 	ROS_INFO_STREAM("The name of this robot is " << model.getName() << ".");
+	this->name = model.getName();					// Transfer name
 
-	
-	// Step 2: Transfer information from urdf to the custom Link class
-	
-	this->serial.joint.resize(branch.size());
-	this->serial.link.resize(branch.size());
 
-	this->n = branch.size()-2;
+	// Cut out superfluous "base" links etc.
+	std::vector<urdf::Link> temp;
+	for(int i = branch.size()-1; i > 0; i--)			// Start from the end-effector and work back
+	{
+		int type = branch[i].parent_joint->type;		// 1 revolute, 2 continuous, 3 prismatic
+		if(type == 1 || type == 2 || type == 3)	temp.push_back(branch[i]); // Add to the array
+	}
+	std::reverse(temp.begin(), temp.end());				// Reverse the array to get the forward sequence
+	this->n = temp.size();						// No. of actual joints
 
 	ROS_INFO_STREAM("There were " << this->n << " joints detected in this model.");
 
-	for(int i = 1; i < branch.size()-1; i++)
-	{
+	// Step 2: Transfer information from urdf to the custom Link class
+	this->serial.joint.resize(this->n);
+	this->serial.link.resize(this->n);
 
+	for(int i = 0; i < this->n; i++)
+	{
 		// Transfer joint information
-		if(branch[i].parent_joint->type == 1 || 2)					// Revolute joint
+		if(temp[i].parent_joint->type == 1 || 2)					// Revolute joint
 		{
-			this->serial.joint[i-1].isRevolute = 1;
+			this->serial.joint[i].is_revolute = 1;
 		}
-		else if(branch[i].parent_joint->type == 3)					// Prismatic joint
+		else if(temp[i].parent_joint->type == 3)					// Prismatic joint
 		{
-			this->serial.joint[i-1].isRevolute = 0;
+			this->serial.joint[i].is_revolute = 0;
 		}
-		this->serial.joint[i-1].damping = branch[i].parent_joint->dynamics->damping;
-		this->serial.joint[i-1].friction = branch[i].parent_joint->dynamics->friction;
-		this->serial.joint[i-1].torqueLimit = branch[i].parent_joint->limits->effort;
-		this->serial.joint[i-1].speedLimit = branch[i].parent_joint->limits->velocity;
-		this->serial.joint[i-1].upperLimit = branch[i].parent_joint->limits->upper;
-		this->serial.joint[i-1].lowerLimit = branch[i].parent_joint->limits->lower;
+		this->serial.joint[i].damping	  = temp[i].parent_joint->dynamics->damping;
+		this->serial.joint[i].friction    = temp[i].parent_joint->dynamics->friction;
+		this->serial.joint[i].torque_limit = temp[i].parent_joint->limits->effort;
+		this->serial.joint[i].speed_limit  = temp[i].parent_joint->limits->velocity;
+		this->serial.joint[i].upper_limit  = temp[i].parent_joint->limits->upper;
+		this->serial.joint[i].lower_limit  = temp[i].parent_joint->limits->lower;
 
 		// Transfer dynamic properties
-		this->serial.link[i-1].inertia.m = branch[i].inertial->mass;
-		this->serial.link[i-1].inertia.ixx = branch[i].inertial->ixx;
-		this->serial.link[i-1].inertia.ixy = branch[i].inertial->ixy;
-		this->serial.link[i-1].inertia.ixz = branch[i].inertial->ixz;
-		this->serial.link[i-1].inertia.iyy = branch[i].inertial->iyy;
-		this->serial.link[i-1].inertia.iyz = branch[i].inertial->iyz;
-		this->serial.link[i-1].inertia.izz = branch[i].inertial->izz;
-		this->serial.link[i-1].inertia.com.x = branch[i].inertial->origin.position.x;
-		this->serial.link[i-1].inertia.com.y = branch[i].inertial->origin.position.y;
-		this->serial.link[i-1].inertia.com.z = branch[i].inertial->origin.position.z;
+		this->serial.link[i].inertia.m     = temp[i].inertial->mass;
+		this->serial.link[i].inertia.ixx   = temp[i].inertial->ixx;
+		this->serial.link[i].inertia.ixy   = temp[i].inertial->ixy;
+		this->serial.link[i].inertia.ixz   = temp[i].inertial->ixz;
+		this->serial.link[i].inertia.iyy   = temp[i].inertial->iyy;
+		this->serial.link[i].inertia.iyz   = temp[i].inertial->iyz;
+		this->serial.link[i].inertia.izz   = temp[i].inertial->izz;
+		this->serial.link[i].inertia.com.x = temp[i].inertial->origin.position.x;
+		this->serial.link[i].inertia.com.y = temp[i].inertial->origin.position.y;
+		this->serial.link[i].inertia.com.z = temp[i].inertial->origin.position.z;
 
 		// Transfer geometric information
-		this->serial.link[i-1].transform.position.x = branch[i].parent_joint->parent_to_joint_origin_transform.position.x;
-		this->serial.link[i-1].transform.position.y = branch[i].parent_joint->parent_to_joint_origin_transform.position.y;
-		this->serial.link[i-1].transform.position.z = branch[i].parent_joint->parent_to_joint_origin_transform.position.z;
-		this->serial.link[i-1].transform.orientation.w = branch[i].parent_joint->parent_to_joint_origin_transform.rotation.w;
-		this->serial.link[i-1].transform.orientation.x = branch[i].parent_joint->parent_to_joint_origin_transform.rotation.x;
-		this->serial.link[i-1].transform.orientation.y = branch[i].parent_joint->parent_to_joint_origin_transform.rotation.y;
-		this->serial.link[i-1].transform.orientation.z = branch[i].parent_joint->parent_to_joint_origin_transform.rotation.z;
-		this->serial.joint[i-1].axis.x = branch[i].parent_joint->axis.x;
-		this->serial.joint[i-1].axis.y = branch[i].parent_joint->axis.y;
-		this->serial.joint[i-1].axis.z = branch[i].parent_joint->axis.z;
+		this->serial.link[i].transform.position.x    = temp[i].parent_joint->parent_to_joint_origin_transform.position.x;
+		this->serial.link[i].transform.position.y    = temp[i].parent_joint->parent_to_joint_origin_transform.position.y;
+		this->serial.link[i].transform.position.z    = temp[i].parent_joint->parent_to_joint_origin_transform.position.z;
+		this->serial.link[i].transform.orientation.w = temp[i].parent_joint->parent_to_joint_origin_transform.rotation.w;
+		this->serial.link[i].transform.orientation.x = temp[i].parent_joint->parent_to_joint_origin_transform.rotation.x;
+		this->serial.link[i].transform.orientation.y = temp[i].parent_joint->parent_to_joint_origin_transform.rotation.y;
+		this->serial.link[i].transform.orientation.z = temp[i].parent_joint->parent_to_joint_origin_transform.rotation.z;
+		this->serial.joint[i].axis.x = temp[i].parent_joint->axis.x;
+		this->serial.joint[i].axis.y = temp[i].parent_joint->axis.y;
+		this->serial.joint[i].axis.z = temp[i].parent_joint->axis.z;
 	}
 
-	ROS_INFO("Finished extracting model properties.");
+	ROS_INFO("Finished extracting serial-link properties from urdf.");
 
 	// Step 3: Resize arrays based on no. of joints
-	this->FK.poses.resize(this->n+1);						// 1 transform for each joint frame + 1 to the end-effector
+	this->FK.poses.resize(this->n);				// 1 transform for each joint frame + 1 to the end-effector???
 
 			
-	this->a.resize(3,this->n);							// Axis of rotation for each joint in global frame
-	this->r.resize(3,this->n);							// Translation from joint to end-effector
-	this->J.resize(6,this->n);							// Jacobian matrix
+	this->a.resize(3,this->n);				// Axis of rotation for each joint in global frame
+	this->r.resize(3,this->n);				// Translation from joint to end-effector
+	this->J.resize(6,this->n);				// Jacobian matrix
 
 
-	this->jointState.position.resize(this->n);
-	this->jointState.velocity.resize(this->n);
-	this->jointState.effort.resize(this->n);
+	this->joint_state.position.resize(this->n);
+	this->joint_state.velocity.resize(this->n);
+	this->joint_state.effort.resize(this->n);
 
 	// Step 4: Assign default values
 	this->origin.position.x = 0;
@@ -231,9 +228,10 @@ SerialLink::SerialLink(int controlFreq)
 	this->origin.orientation.y = 0;
 	this->origin.orientation.z = 0;
 
-	this->Hz = controlFreq;
 
-/*
+	// Step 5: Get custom values from parameter server
+
+/*	This is old code that can be deleted in the future
 	// GET JOINTS, JOINT TRANSFORMS, AND INERTIA ARRAY
 	this->jointArray.clear();
 	this->inertiaArray.clear();
@@ -337,11 +335,11 @@ void SerialLink::updateState(const sensor_msgs::JointState &input,
 
 void SerialLink::updateState(const sensor_msgs::JointState &input)			// Update just the joint states
 {
-	this->jointState.position = input.position;
-	this->jointState.velocity = input.velocity;
-	this->jointState.effort = input.effort; /*** Might need to compute this properly as acceleration? ***/
+	this->joint_state.position = input.position;
+	this->joint_state.velocity = input.velocity;
+	this->joint_state.effort = input.effort;
 
-	updateForwardKinematics(this->FK, this->jointState, this->serial, this->origin); // Update the forward-kinematics chain
+	updateForwardKinematics(this->FK, this->joint_state, this->serial, this->origin); // Update the forward-kinematics chain
 	updateAxis(this->a, this->FK, this->serial);				// Joint axis in reference frame
 	updateTranslation(this->r, this->FK);					// Distance from joint to end-effector in reference frame
 }
@@ -375,13 +373,13 @@ double SerialLink::getDamping(const Eigen::MatrixXd &J)
 	{
 		for(int j = 0; j < this->n; j++)
 		{
-			for(int k = 0; k < 6; k++) JJt(i,k) = J(i,j)*J(k,j);
+			for(int k = 0; k < 6; k++) JJt(i,k) = J(i,j)*J(k,j); // Is this faster than calling J*J.transpose()?
 		}
 	}
 
-	double m = pow(JJt.determinant(),0.5);
+	double m = pow(JJt.determinant(),0.5);					// Measure of manipulability
 	
-	if(m < this->threshold) return (1-pow(this->threshold/m,2))*this->maxDamping;
+	if(m < this->threshold) return (1-pow(this->threshold/m,2))*this->max_damping;
 	else			return 0.0;
 }
 
@@ -392,8 +390,8 @@ void SerialLink::invertJacobian(Eigen::MatrixXd &W)					// Weighted pseudo-inver
 
 	for(int i = 0; i < this->n; i++)
 	{
-		W(i,i) = getJointWeight(this->jointState.position[i],
-					this->jointState.velocity[i],
+		W(i,i) = getJointWeight(this->joint_state.position[i],
+					this->joint_state.velocity[i],
 					this->serial.joint[i]);
 	}
 

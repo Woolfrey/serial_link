@@ -54,7 +54,7 @@ void updateForwardKinematics(geometry_msgs::PoseArray &T, const sensor_msgs::Joi
 	for(int i = 0; i < n; i++)
 	{
 		// Construct the individual joint transform
-		if(serial.joint[i].isRevolute)							
+		if(serial.joint[i].is_revolute)							
 		{
 			// Zero translation
 			Tq.position.x = 0;
@@ -75,7 +75,7 @@ void updateForwardKinematics(geometry_msgs::PoseArray &T, const sensor_msgs::Joi
 			Tq.position.y = jointState.position[i]*serial.joint[i].axis.y;
 			Tq.position.z = jointState.position[i]*serial.joint[i].axis.z;
 
-			// Zero orientation
+			// Zero rotation
 			Tq.orientation.w = 1;
 			Tq.orientation.x = 0;
 			Tq.orientation.y = 0;
@@ -128,7 +128,7 @@ void updateJacobian(Eigen::MatrixXd &J, const Eigen::MatrixXd &a, const Eigen::M
 	for(int i = 0; i < n; i++)
 	{
 		ai = a.block(0,i,3,1);
-		if(serial.joint[i].isRevolute)
+		if(serial.joint[i].is_revolute)
 		{
 			ri = a.block(0,i,3,1);
 
@@ -166,13 +166,13 @@ error.orientation.z = -d.orientation.w*a.orientation.z - d.orientation.x*a.orien
 
 double getJointWeight(const double &pos, const double &vel, const serial_link::Joint joint)
 {
-	double s= 1000*pow(joint.upperLimit - joint.lowerLimit, -2);					// Individual joint scalar
-	double u = joint.upperLimit - pos;								// Distance from upper limit
-	double v = pos - joint.lowerLimit;								// Distance from lower limit
-	double df = (u*u - v*v)/(-s*u*u*v*v);								// Partial-derivative of penalty function
-	double fdot = df*vel;										// Time-derivative of penalty function
+	double s  = 1000*pow(joint.upper_limit - joint.lower_limit, -2);			// Individual joint scalar
+	double u  = joint.upper_limit - pos;							// Distance from upper limit
+	double v  = pos - joint.lower_limit;							// Distance from lower limit
+	double df = (u*u - v*v)/(-s*u*u*v*v);							// Partial-derivative of penalty function
+	double fdot = df*vel;									// Time-derivative of penalty function
 	
-	if(fdot > 0) return df;										// Moving toward a joint limit
-	else return 0;											// Moving away from joint limit
+	if(fdot > 0) return df;									// Moving toward a joint limit
+	else return 0;										// Moving away from joint limit
 }
 						
