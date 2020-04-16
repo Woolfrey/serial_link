@@ -7,10 +7,12 @@ class SerialLink{
 
 	public:
 		// Properties
+		double p_gain = 1;
+		double d_gain = 0.1;
 		double threshold = 0.01;					// Threshold value for activating damped least squares
 		double max_damping = 0.1;					// Maximum damping factor
 
-		int Hz;								// Control frequency (used for joint limit avoidance)
+		int control_frequency = 100;					// Control frequency (used for joint limit avoidance)
 		int n;								// No. of joints
 
 		Eigen::MatrixXd J;						// Jacobian matrix
@@ -228,8 +230,21 @@ bool SerialLink::init(const std::string &paramName)
 	this->origin.orientation.y = 0;
 	this->origin.orientation.z = 0;
 
-
 	// Step 5: Get custom values from parameter server
+	if(ros::param::get(this->name+"/control_frequency", this->control_frequency));
+	else ROS_INFO_STREAM("Using default control_frequency of " << this->control_frequency << " Hz.");
+
+	if(ros::param::get(this->name+"/p_gain", this->p_gain));
+	else ROS_INFO_STREAM("Using default p_gain of " << this->p_gain << ".");
+
+	if(ros::param::get(this->name+"/d_gain", this->d_gain));
+	else ROS_INFO_STREAM("Using default d_gain of " << this->d_gain << ".");
+
+	if(ros::param::get(this->name+"/max_damping", this->max_damping));
+	else ROS_INFO_STREAM("Using default max_damping of " << this->max_damping << " for singularity avoidance.");
+
+	if(ros::param::get(this->name+"/threshold", this->threshold));
+	else ROS_INFO_STREAM("Using default threshold of " << this->threshold << " for activating singularity avoidance.");
 
 /*	This is old code that can be deleted in the future
 	// GET JOINTS, JOINT TRANSFORMS, AND INERTIA ARRAY
