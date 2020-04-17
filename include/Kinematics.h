@@ -8,19 +8,29 @@ geometry_msgs::Point rotatePoint(const geometry_msgs::Quaternion &rot, const geo
 {
 	geometry_msgs::Point p;									// To be returned
 
-	p.x = (rot.w*rot.w + rot.x*rot.x - rot.y*rot.y - rot.z*rot.z)*point.x
-            + (2*rot.x*rot.y - 2*rot.w*rot.z)*point.y
- 	    + (2*rot.x*rot.z + 2*rot.w*rot.y)*point.z;
+	p.x = (1- 2*(rot.y*rot.y + rot.z*rot.z))*point.x
+	    + 2*(rot.x*rot.y - rot.z*rot.w)*point.y
+	    + 2*(rot.x*rot.z + rot.y*rot.w)*point.z;
 
-	p.y = (2*rot.x*rot.y +rot.w*rot.z)*point.x
-	    + (rot.w*rot.w - rot.x*rot.x + rot.y*rot.y - rot.z*rot.z)*point.y
-	    + (2*rot.y*rot.z - 2*rot.w*rot.x)*point.z;
+	p.y = 2*(rot.x*rot.y + rot.z*rot.w)*point.x
+	    + (1 - 2*(rot.x*rot.x + rot.z*rot.z))*point.y
+	    + 2*(rot.y*rot.z - rot.x*rot.w)*point.z;
 
-	p.z = (2*rot.x*rot.z - 2*rot.w*rot.y)*point.x
-	    + (2*rot.y*rot.z + 2*rot.w*rot.x)*point.y
-	    + (rot.w*rot.w - rot.x*rot.x - rot.y*rot.y + rot.z*rot.z)*point.z;
+	p.z = 2*(rot.x*rot.z - rot.y*rot.w)*point.x
+	    + 2*(rot.y*rot.z + rot.x*rot.w)*point.y
+	    + (1 - 2*(rot.x*rot.x + rot.y*rot.y))*point.z;
 
 	return p;
+}
+
+void normaliseQuaternion(geometry_msgs::Quaternion &quat)
+{
+	double numerator = pow(quat.w*quat.w + quat.x*quat.x + quat.y*quat.y + quat.z*quat.z, 0.5);
+
+	quat.w /= numerator;
+	quat.x /= numerator;
+	quat.y /= numerator;
+	quat.z /= numerator;
 }
 
 geometry_msgs::Pose multiplyPose(const geometry_msgs::Pose &T1, const geometry_msgs::Pose &T2)
@@ -36,20 +46,39 @@ geometry_msgs::Pose multiplyPose(const geometry_msgs::Pose &T1, const geometry_m
 	T3.position.z = T1.position.z + p3.z;
 
 	// Quaternion multiplication
-	T3.orientation.w = T1.orientation.w*T2.orientation.w - T1.orientation.x*T2.orientation.x - T1.orientation.y*T2.orientation.y - T1.orientation.z*T1.orientation.z;
-	T3.orientation.x = T1.orientation.w*T2.orientation.x + T1.orientation.x*T2.orientation.w + T1.orientation.y*T2.orientation.z - T1.orientation.z*T2.orientation.y;
-	T3.orientation.y = T1.orientation.w*T2.orientation.y - T1.orientation.x*T2.orientation.z + T1.orientation.y*T2.orientation.w + T1.orientation.z*T2.orientation.x;
-	T3.orientation.z = T1.orientation.w*T2.orientation.z + T1.orientation.x*T2.orientation.y - T1.orientation.y*T2.orientation.x + T1.orientation.z*T2.orientation.w;
+	T3.orientation.w = T1.orientation.w*T2.orientation.w 
+			 - T1.orientation.x*T2.orientation.x 
+			 - T1.orientation.y*T2.orientation.y 
+			 - T1.orientation.z*T1.orientation.z;
+
+	T3.orientation.x = T1.orientation.w*T2.orientation.x 
+			 + T1.orientation.x*T2.orientation.w
+			 + T1.orientation.y*T2.orientation.z 
+			 - T1.orientation.z*T2.orientation.y;
+
+	T3.orientation.y = T1.orientation.w*T2.orientation.y
+			 + T1.orientation.y*T2.orientation.w
+			 + T1.orientation.z*T2.orientation.x
+			 - T1.orientation.x*T2.orientation.z;
+
+	T3.orientation.z = T1.orientation.w*T2.orientation.z
+			 + T1.orientation.z*T2.orientation.w
+			 + T1.orientation.x*T2.orientation.y
+			 - T1.orientation.y*T2.orientation.x;
+
+	normaliseQuaternion(T3.orientation);			// Ensure unit norm
 
 	return T3;
 }
 
-void updateForwardKinematics(geometry_msgs::PoseArray &T, const sensor_msgs::JointState &jointState,
-			     const serial_link::Serial &serial, const geometry_msgs::Pose &T0)
+void updateForwardKinematics(geometry_msgs::PoseArray &T,
+			     const sensor_msgs::JointState &jointState,
+			     const serial_link::Serial &serial,
+			     const geometry_msgs::Pose &T0)
 {
-	const int n = serial.joint.size();							// No. of joints
-	geometry_msgs::Pose Tq;									// Transform of the current joint position
-	double phi;
+	const int n = serial.joint.size();						// No. of joints
+	geometry_msgs::Pose Tq;								// Transform of the current joint position
+	double phi;									// Half angle of rotation
 
 	for(int i = 0; i < n; i++)
 	{
@@ -85,8 +114,6 @@ void updateForwardKinematics(geometry_msgs::PoseArray &T, const sensor_msgs::Joi
 		if(i == 0) T.poses[i] = multiplyPose(multiplyPose(T0,serial.link[i].transform),Tq); // First multiply the base transform
 		else	   T.poses[i] = multiplyPose(multiplyPose(T.poses[i-1],serial.link[i].transform),Tq);
 	}
-
-	T.poses[n] = multiplyPose(T.poses[n-1],serial.link[n].transform);		// Transform to end-effector has no joint
 }
 
 void updateAxis(Eigen::MatrixXd &axis, const geometry_msgs::PoseArray &FK, const serial_link::Serial &serial)
@@ -130,8 +157,7 @@ void updateJacobian(Eigen::MatrixXd &J, const Eigen::MatrixXd &a, const Eigen::M
 		ai = a.block(0,i,3,1);
 		if(serial.joint[i].is_revolute)
 		{
-			ri = a.block(0,i,3,1);
-
+			ri = r.block(0,i,3,1);
 			J.block(0,i,3,1) = ai.cross(ri);
 			J.block(3,i,3,1) = ai;
 		}
@@ -145,26 +171,43 @@ void updateJacobian(Eigen::MatrixXd &J, const Eigen::MatrixXd &a, const Eigen::M
 	}
 }
 
-geometry_msgs::Pose getPoseError(const geometry_msgs::Pose &d, const geometry_msgs::Pose &a)
+geometry_msgs::Pose getPoseError(const geometry_msgs::Pose &desired, const geometry_msgs::Pose &actual)
 {
 	geometry_msgs::Pose error;
 	
 	// Position Error
-	error.position.x = d.position.x - a.position.x;
-	error.position.y = d.position.y - a.position.y;
-	error.position.z = d.position.z - a.position.z;
+	error.position.x = desired.position.x - actual.position.x;
+	error.position.y = desired.position.y - actual.position.y;
+	error.position.z = desired.position.z - actual.position.z;
 
 	// Orientation Error
-error.orientation.w = d.orientation.w*a.orientation.w + d.orientation.x*a.orientation.x + d.orientation.y*a.orientation.y + d.orientation.z*a.orientation.z;
-error.orientation.x = -d.orientation.w*a.orientation.x + d.orientation.x*a.orientation.w - d.orientation.y*a.orientation.z + d.orientation.z*a.orientation.y;
-error.orientation.y = -d.orientation.w*a.orientation.y + d.orientation.x*a.orientation.z + d.orientation.y*a.orientation.w - d.orientation.z*a.orientation.x;
-error.orientation.z = -d.orientation.w*a.orientation.z - d.orientation.x*a.orientation.y + d.orientation.y*a.orientation.x + d.orientation.z*a.orientation.w;
+	error.orientation.w = desired.orientation.w*actual.orientation.w 
+			    + desired.orientation.x*actual.orientation.x 
+			    + desired.orientation.y*actual.orientation.y 
+			    + desired.orientation.z*actual.orientation.z;
+
+	error.orientation.x = -desired.orientation.w*actual.orientation.x 
+			    + desired.orientation.x*actual.orientation.w 
+			    - desired.orientation.y*actual.orientation.z 
+			    + desired.orientation.z*actual.orientation.y;
+
+	error.orientation.y = -desired.orientation.w*actual.orientation.y 
+			    + desired.orientation.x*actual.orientation.z 
+			    + desired.orientation.y*actual.orientation.w 
+			    - desired.orientation.z*actual.orientation.x;
+
+	error.orientation.z = -desired.orientation.w*actual.orientation.z 
+			    - desired.orientation.x*actual.orientation.y 
+			    + desired.orientation.y*actual.orientation.x 
+			    + desired.orientation.z*actual.orientation.w;
+
+	normaliseQuaternion(error.orientation);							// Ensure unit norm
 
 	return error;
 }
 
 
-double getJointWeight(const double &pos, const double &vel, const serial_link::Joint joint)
+double getJointWeight(const double &pos, const double &vel, const serial_link::Joint &joint)
 {
 	double s  = 1000*pow(joint.upper_limit - joint.lower_limit, -2);			// Individual joint scalar
 	double u  = joint.upper_limit - pos;							// Distance from upper limit

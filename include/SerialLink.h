@@ -82,8 +82,8 @@ bool SerialLink::init(const std::string &paramName)
 
 	if(model.initParam(paramName)) 
 	{
-		branch.push_back(*model.getRoot());						// This gets the location of the urdf model
-		int count = 0;									// No. of child links	
+		branch.push_back(*model.getRoot());					// This gets the location of the urdf model
+		int count = 0;								// No. of child links	
 
 		bool breakLoop = false;
 
@@ -174,8 +174,8 @@ bool SerialLink::init(const std::string &paramName)
 		{
 			this->serial.joint[i].is_revolute = 0;
 		}
-		this->serial.joint[i].damping	  = temp[i].parent_joint->dynamics->damping;
-		this->serial.joint[i].friction    = temp[i].parent_joint->dynamics->friction;
+		this->serial.joint[i].damping	   = temp[i].parent_joint->dynamics->damping;
+		this->serial.joint[i].friction     = temp[i].parent_joint->dynamics->friction;
 		this->serial.joint[i].torque_limit = temp[i].parent_joint->limits->effort;
 		this->serial.joint[i].speed_limit  = temp[i].parent_joint->limits->velocity;
 		this->serial.joint[i].upper_limit  = temp[i].parent_joint->limits->upper;
@@ -217,18 +217,28 @@ bool SerialLink::init(const std::string &paramName)
 	this->J.resize(6,this->n);				// Jacobian matrix
 
 
+	this->control_msg.velocity.resize(this->n);
+	this->control_msg.effort.resize(this->n);
 	this->joint_state.position.resize(this->n);
 	this->joint_state.velocity.resize(this->n);
 	this->joint_state.effort.resize(this->n);
+	
 
 	// Step 4: Assign default values
-	this->origin.position.x = 0;
-	this->origin.position.y = 0;
-	this->origin.position.z = 0;
-	this->origin.orientation.w = 1;
-	this->origin.orientation.x = 0;
-	this->origin.orientation.y = 0;
-	this->origin.orientation.z = 0;
+	this->origin.position.x = 0.0;
+	this->origin.position.y = 0.0;
+	this->origin.position.z = 0.0;
+	this->origin.orientation.w = 1.0;
+	this->origin.orientation.x = 0.0;
+	this->origin.orientation.y = 0.0;
+	this->origin.orientation.z = 0.0;
+
+	for(int i = 0; i < this->n; i++)
+	{
+		this->joint_state.position[i] = 0.0;
+		this->joint_state.velocity[i] = 0.0;
+		this->joint_state.effort[i] = 0.0;
+	}
 
 	// Step 5: Get custom values from parameter server
 	if(ros::param::get(this->name+"/control_frequency", this->control_frequency));
@@ -365,16 +375,16 @@ sensor_msgs::JointState SerialLink::rmrc(const geometry_msgs::Pose &pose, const 
 
 	invertJacobian(); /*** In future use invertJacobian(this->M) ***/		// Update the inverse of this Jacobian
 
-	geometry_msgs::Pose error = getPoseError(pose, this->FK.poses[this->n]);	// Compute the current pose error
+	geometry_msgs::Pose error = getPoseError(pose, this->FK.poses[this->n-1]);	// Compute the current pose error
 
 	for(int i = 0; i < this->n; i++)
 	{
-		this->control_msg.velocity[i] = this->invJ(i,0)*(vel.linear.x + 0.9*error.position.x)
-				    	      + this->invJ(i,1)*(vel.linear.y + 0.9*error.position.y)
-				    	      + this->invJ(i,2)*(vel.linear.z + 0.9*error.position.z)
-				    	      + this->invJ(i,3)*(vel.angular.x + 0.9*error.orientation.x)
-				    	      + this->invJ(i,4)*(vel.angular.y + 0.9*error.orientation.y)
-				    	      + this->invJ(i,5)*(vel.angular.z + 0.9*error.orientation.z);
+		this->control_msg.velocity[i] = this->invJ(i,0)*(vel.linear.x + this->p_gain*error.position.x)
+				    	      + this->invJ(i,1)*(vel.linear.y + this->p_gain*error.position.y)
+				    	      + this->invJ(i,2)*(vel.linear.z + this->p_gain*error.position.z)
+				    	      + this->invJ(i,3)*(vel.angular.x + this->p_gain*error.orientation.x)
+				    	      + this->invJ(i,4)*(vel.angular.y + this->p_gain*error.orientation.y)
+				    	      + this->invJ(i,5)*(vel.angular.z + this->p_gain*error.orientation.z);
 	}
 
 	return control_msg;
@@ -382,37 +392,46 @@ sensor_msgs::JointState SerialLink::rmrc(const geometry_msgs::Pose &pose, const 
 
 double SerialLink::getDamping(const Eigen::MatrixXd &J)
 {
-	Eigen::MatrixXd JJt;
+	Eigen::Matrix<double,6,6> JJt;
 
 	for(int i = 0; i < 6; i++)
 	{
 		for(int j = 0; j < this->n; j++)
 		{
-			for(int k = 0; k < 6; k++) JJt(i,k) = J(i,j)*J(k,j); // Is this faster than calling J*J.transpose()?
+			for(int k = 0; k < 6; k++) 
+			{
+				JJt(i,k) = J(i,j)*J(k,j); 				// Is this faster than calling J*J.transpose()?
+			}
 		}
 	}
 
-	double m = pow(JJt.determinant(),0.5);					// Measure of manipulability
+	double m = pow(JJt.determinant(),0.5);						// Measure of manipulability
 	
-	if(m < this->threshold) return (1-pow(this->threshold/m,2))*this->max_damping;
+	if(m < this->threshold) return (1-pow(m/this->threshold,2))*this->max_damping;
 	else			return 0.0;
 }
 
 void SerialLink::invertJacobian(Eigen::MatrixXd &W)					// Weighted pseudo-inverse
 {
-
 	double lambda = getDamping(this->J);						// Get the coefficient for DLS
 
-	for(int i = 0; i < this->n; i++)
+	if(this->n < 7)
 	{
-		W(i,i) = getJointWeight(this->joint_state.position[i],
-					this->joint_state.velocity[i],
-					this->serial.joint[i]);
+		this->invJ = (J*J.transpose() + lambda*Eigen::MatrixXd::Identity(6,6)).inverse(); // Just use damped least squares
 	}
+	else
+	{
+		// Update weighting matrix for joint limit avoidance
+		for(int i = 0; i < this->n; i++)
+		{
+			W(i,i) += getJointWeight(this->joint_state.position[i],
+						this->joint_state.velocity[i],
+						this->serial.joint[i]);
+		}
 
-	Eigen::MatrixXd invWJt = W.inverse()*J.transpose();				// Hopefully makes computations a little faster
-
-	this->invJ = invWJt*(J*invWJt + lambda*Eigen::MatrixXd::Identity(6,6)).inverse(); // Weighted pseudoinverse
+		Eigen::MatrixXd invWJt = W.inverse()*J.transpose();	// Hopefully makes computations a little faster
+		this->invJ = invWJt*(J*invWJt + lambda*Eigen::MatrixXd::Identity(6,6)).inverse(); // Weighted pseudoinverse
+	}
 }
 
 void SerialLink::invertJacobian()							// No weighting matrix given, so use identity matrix
